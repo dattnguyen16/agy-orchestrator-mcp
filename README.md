@@ -403,6 +403,7 @@ Set `AGY_ORCA=0` to disable Orca entirely.
 Observed with the `agy` CLI as of November 2026 (fixtures in `test/fixtures/`):
 
 - **Shell commands are auto-denied in `-p` mode** unless `--dangerously-skip-permissions` is passed (or an allow-rule exists in agy's `settings.json`). The turn still ends with `status: SUCCESS`; the denial only shows up in `result.denied_actions`. The server surfaces it as the `denied` flag.
+- **A denied command aborts the turn.** agy stops right there ("no output produced") and never runs the `--json-schema` step, so the report is lost. The server therefore tells workers without `skip_permissions` not to run shell commands (and that it will run `verify_cmd` itself). If a report is still missing, the digest says so in `report.missing` instead of returning nothing.
 - **`--json-schema`** puts the parsed object in `result.structured_output` and costs the worker one extra short step. Disable with `report: false`.
 - **`--disable-slash-commands` turns `--mode plan` into a no-op** (agy prints a warning). The server passes it only outside plan mode.
 - Stream format: `{"event":"init"}`, `{"event":"step_update","step_update":{step_type, state, tool_name, tool_info, text_delta, usage}}`, `{"event":"result","result":{status, response, structured_output, usage, denied_actions}}`.
@@ -425,7 +426,7 @@ Reproduce with the size assertions in `test-mcp.mjs`.
 npm test
 ```
 
-20 end-to-end tests drive the real server over stdio with mock `agy` and `orca` executables:
+21 end-to-end tests drive the real server over stdio with mock `agy` and `orca` executables:
 report parsing, event filtering, role flags, worktree diff with untracked files, merge refusal / conflict
 prediction / squash merge, verify fail→fix→pass, verify exhaustion, verify timeout, denied/loop/stall flags,
 concurrency queue, process-group kill (including grandchildren), interrupt + resume, restart with a live
@@ -449,7 +450,7 @@ Raw logs: `logs/<id>.ndjson` (agy stream + server markers), `logs/<id>.stderr`, 
 ## Limitations
 
 - The stream-json schema is not formally documented by agy; the parser is built from observed output and keeps a generic fallback. A future agy release may need parser updates.
-- Orca integration has been exercised against mocks and the real Orca CLI's error path; the full happy path depends on your repo being registered in Orca.
+- Orca integration is verified against Orca 1.4.272 (worktree visibility, live terminal, open-changed) and depends on your repo being added to Orca.
 - `verify_cmd` runs unsandboxed with your user's permissions.
 - Process liveness after a restart is checked by PID, so PID reuse is theoretically possible on a long-idle machine.
 - Tested on macOS. Linux should work; Windows is untested (process groups, `/bin/sh`).

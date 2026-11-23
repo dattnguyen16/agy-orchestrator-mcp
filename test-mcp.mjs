@@ -43,7 +43,8 @@ else {
   if (prompt.includes("verification command") && prompt.includes("ok.txt")) fs.writeFileSync("ok.txt", "ok\\n");
   if (prompt.includes("LOOP")) for (let i = 0; i < 6; i++) tool("read_file", { Path: "same.txt" });
   for (let i = 0; i < 4; i++) tool("read_file", { Path: path.join(process.cwd(), "f" + i + ".txt") });
-  if (prompt.includes("DENY")) result({ denied_actions: [{ action: "command", display_name: "Bash" }] });
+  if (prompt.includes("ABORTDENY")) result({ response: "", structured_output: null, denied_actions: [{ action: "command", display_name: "Bash" }] });
+  else if (prompt.includes("DENY")) result({ denied_actions: [{ action: "command", display_name: "Bash" }] });
   else result();
 }
 `);
@@ -286,6 +287,16 @@ await test("denied shell command -> needs_attention + flag", async () => {
   const d = await waitDone(c, a.id);
   assert.equal(d.status, "needs_attention");
   assert.ok(d.flags.some((f) => f.startsWith("denied: Bash")));
+  await c.call("agy_cleanup", { agent_id: a.id });
+});
+
+await test("denied abort without report -> explicit 'missing' note; prompt warns about shell", async () => {
+  const a = await spawnOne(c, { prompt: "ABORTDENY", cwd: repo, verify_cmd: "true" });
+  const d = await waitDone(c, a.id);
+  assert.equal(d.status, "completed");
+  assert.match(d.report.missing, /denied Bash/);
+  const p = argvLines().filter((l) => l.args.at(-1).includes("ABORTDENY")).at(-1).args.at(-1);
+  assert.match(p, /Shell commands are disabled.*runs `true` after you finish/s);
   await c.call("agy_cleanup", { agent_id: a.id });
 });
 

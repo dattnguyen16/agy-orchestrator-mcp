@@ -154,12 +154,13 @@ Mọi lệnh Orca đều best-effort: lỗi chỉ thành `warnings`, không bao 
 ## Lưu ý về `agy` headless
 
 - Ở `-p`, lệnh shell bị **tự từ chối** nếu không có `--dangerously-skip-permissions`, nhưng agy vẫn trả `SUCCESS`. Server gắn cờ `denied`.
+- Lệnh bị từ chối làm agy **bỏ ngang turn** và mất luôn report. Vì vậy server dặn worker không chạy shell (server tự chạy `verify_cmd`). Nếu vẫn thiếu report, digest ghi rõ ở `report.missing`.
 - `--json-schema` cho kết quả ở `result.structured_output`, và worker tốn thêm một bước ngắn. Tắt bằng `report:false`.
 - `--disable-slash-commands` làm `--mode plan` mất tác dụng, nên server chỉ bật cờ này ngoài plan mode.
 
 ## Kiểm thử, giới hạn, bảo mật
 
-- `npm test` chạy 20 test end-to-end với mock `agy` và mock `orca`.
+- `npm test` chạy 21 test end-to-end với mock `agy` và mock `orca`.
 - **Giới hạn:**
   - Schema stream-json của agy chưa có tài liệu chính thức; parser dựa trên output quan sát được (tháng 11/2026).
   - Mới test trên macOS.
