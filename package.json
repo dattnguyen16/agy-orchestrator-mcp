@@ -1,0 +1,45 @@
+{
+  "name": "agy-orchestrator-mcp",
+  "version": "2.0.0",
+  "description": "MCP server that lets Claude Code orchestrate Antigravity (agy) CLI sub-agents token-efficiently: structured reports, server-side verify & auto-fix, git worktrees, safe merge, Orca IDE integration.",
+  "type": "module",
+  "main": "server.mjs",
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node test-mcp.mjs"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "license": "MIT",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "claude-code",
+    "antigravity",
+    "agy",
+    "multi-agent",
+    "orchestrator",
+    "orca"
+  ],
+  "bin": {
+    "agy-tail": "bin/agy-tail.mjs"
+  },
+  "files": [
+    "server.mjs",
+    "lib/",
+    "bin/",
+    "skills/",
+    "README.md",
+    "README.vi.md",
+    "LICENSE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dattnguyen16/agy-orchestrator-mcp.git"
+  },
+  "homepage": "https://github.com/dattnguyen16/agy-orchestrator-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/dattnguyen16/agy-orchestrator-mcp/issues"
+  }
+}
