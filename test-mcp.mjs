@@ -277,6 +277,23 @@ await test("merge conflict predicted, nothing changed", async () => {
   await c.call("agy_cleanup", { agent_id: b.id, force: true, delete_branch: true });
 });
 
+await test("merge refuses secrets inside new dirs and ones the worker committed", async () => {
+  const b = await spawnOne(c, { prompt: "hi", cwd: repo, use_worktree: true, name: "sec" });
+  await waitDone(c, b.id);
+  const wt = (await c.call("agy_result", { agent_id: b.id })).cwd;
+  fs.mkdirSync(path.join(wt, "certs"));
+  fs.writeFileSync(path.join(wt, "certs", "server.key"), "k\n");
+  const r1 = await c.call("agy_merge", { agent_id: b.id });
+  assert.match(r1.reason || "", /sensitive.*certs\/server\.key/, JSON.stringify(r1));
+  fs.rmSync(path.join(wt, "certs"), { recursive: true });
+  fs.writeFileSync(path.join(wt, "cert.pem"), "p\n");
+  execFileSync("git", ["add", "cert.pem"], { cwd: wt });
+  execFileSync("git", ["commit", "-qm", "worker commit"], { cwd: wt });
+  const r2 = await c.call("agy_merge", { agent_id: b.id });
+  assert.match(r2.reason || "", /sensitive.*cert\.pem/, JSON.stringify(r2));
+  await c.call("agy_cleanup", { agent_id: b.id, force: true, delete_branch: true });
+});
+
 await test("cleanup removes worktree", async () => {
   const r = await c.call("agy_cleanup", { agent_id: wtAgent.id, delete_branch: true });
   assert.ok(r.actions.includes("worktree removed"));
@@ -347,6 +364,16 @@ await test("stall flag wakes agy_wait early", async () => {
   assert.ok(Date.now() - t0 < 10000);
   assert.ok(!r.timed_out);
   assert.ok(r.agents[0].flags.some((f) => f.startsWith("stalled")));
+  await c.call("agy_stop", { agent_id: a.id });
+  await c.call("agy_cleanup", { agent_id: a.id });
+});
+
+await test("wait any: an already-reported worker in agent_ids does not end the wait", async () => {
+  const a = await spawnOne(c, { prompt: "SLEEP", cwd: repo });
+  const t0 = Date.now();
+  const r = await c.call("agy_wait", { agent_ids: [first.id, a.id], timeout_seconds: 2 });
+  assert.equal(r.timed_out, true, JSON.stringify(r));
+  assert.ok(Date.now() - t0 >= 1900, "blocked instead of returning at once");
   await c.call("agy_stop", { agent_id: a.id });
   await c.call("agy_cleanup", { agent_id: a.id });
 });
