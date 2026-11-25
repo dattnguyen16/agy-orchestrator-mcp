@@ -11,7 +11,7 @@ import { SERVER_INSTRUCTIONS, TOOLS, handleToolCall } from "./lib/tools.mjs";
 import { compact } from "./lib/util.mjs";
 
 const SERVER_NAME = "agy-orchestrator";
-const SERVER_VERSION = "2.0.0";
+const SERVER_VERSION = "2.1.0";
 
 const send = (msg) => process.stdout.write(`${JSON.stringify(msg)}\n`);
 const sendResult = (id, result) => send({ jsonrpc: "2.0", id, result });

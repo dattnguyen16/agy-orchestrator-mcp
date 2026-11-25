@@ -31,6 +31,7 @@ function render(o) {
     const denied = r.denied_actions?.length ? c(33, ` denied: ${r.denied_actions.map((d) => d.display_name).join(",")}`) : "";
     return `${time} ${c(r.status === "SUCCESS" ? 32 : 31, `■ result ${r.status}`)} ${dim(`${r.usage?.total_tokens ?? "?"} tok`)}${denied}`;
   }
+  if (o.type) return renderCodex(o, time);
   if (!s) return null;
   if (s.step_type === "tool") {
     if (s.state === "ACTIVE") return `${time} ${c(34, "▸")} ${s.tool_name} ${dim(arg(s.tool_info?.parameters))}`;
@@ -44,6 +45,34 @@ function render(o) {
     return null;
   }
   return null;
+}
+
+// Codex `exec --json` events.
+function renderCodex(o, time) {
+  const it = o.item || {};
+  const cmd = (x) => String(x || "").replace(/^\S*sh -lc (['"])([\s\S]*)\1$/, "$2").replace(/\s+/g, " ").slice(0, 120);
+  switch (o.type) {
+    case "thread.started":
+      return `${time} ${dim(`codex thread ${o.thread_id || ""}`)}`;
+    case "turn.completed":
+      return `${time} ${c(32, "■ result DONE")} ${dim(`${(o.usage?.input_tokens || 0) + (o.usage?.output_tokens || 0)} tok`)}`;
+    case "turn.failed":
+      return `${time} ${c(31, `■ result FAILED ${o.error?.message || ""}`)}`;
+    case "error":
+      return `${time} ${c(33, `! ${o.message || ""}`)}`;
+    case "item.started":
+      if (it.type === "command_execution") return `${time} ${c(34, "▸")} shell ${dim(cmd(it.command))}`;
+      if (it.type === "mcp_tool_call") return `${time} ${c(34, "▸")} ${it.server}.${it.tool}`;
+      if (it.type === "web_search") return `${time} ${c(34, "▸")} web_search ${dim(it.query || "")}`;
+      return null;
+    case "item.completed":
+      if (it.type === "agent_message") return `${time} ${it.text}`;
+      if (it.type === "command_execution" && it.exit_code) return `${time} ${c(31, "✗")} exit ${it.exit_code}: ${dim(cmd(it.command))}`;
+      if (it.type === "file_change") return `${time} ${c(34, "✎")} ${(it.changes || []).map((x) => x.path).join(", ")}`;
+      return null;
+    default:
+      return null;
+  }
 }
 
 function drain() {

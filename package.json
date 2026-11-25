@@ -1,7 +1,7 @@
 {
   "name": "agy-orchestrator-mcp",
-  "version": "2.0.0",
-  "description": "MCP server that lets Claude Code orchestrate Antigravity (agy) CLI sub-agents token-efficiently: structured reports, server-side verify & auto-fix, git worktrees, safe merge, Orca IDE integration.",
+  "version": "2.1.0",
+  "description": "MCP server that lets Claude Code orchestrate Antigravity (agy) or OpenAI Codex CLI sub-agents token-efficiently: structured reports, server-side verify & auto-fix, git worktrees, safe merge, Orca IDE integration.",
   "type": "module",
   "main": "server.mjs",
   "scripts": {
@@ -18,6 +18,7 @@
     "claude-code",
     "antigravity",
     "agy",
+    "codex",
     "multi-agent",
     "orchestrator",
     "orca"

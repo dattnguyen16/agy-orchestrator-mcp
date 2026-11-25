@@ -1,0 +1,5 @@
+{"type":"thread.started","thread_id":"01a2108a-5358-7240-941c-9f41e5da8d76"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"I’ll try to create `tmp-probe.txt` containing `hi` and report whether it succeeds."}}
+{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"{\"summary\":\"Creation was blocked: operation not permitted. tmp-probe.txt was not created.\",\"files_changed\":[],\"open_questions\":[],\"confidence\":\"high\"}"}}
+{"type":"turn.completed","usage":{"input_tokens":85210,"cached_input_tokens":63360,"cache_write_input_tokens":0,"output_tokens":284,"reasoning_output_tokens":0}}

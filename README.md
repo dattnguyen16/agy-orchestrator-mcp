@@ -64,6 +64,7 @@ the tool schemas Claude loads shrank from ~6.3 KB to ~4.0 KB. See [Token benchma
 ## Features
 
 - **8 compact tools** — spawn, wait, result, instruct, stop, list, merge, cleanup.
+- **Two worker CLIs** — Antigravity `agy` (default) or OpenAI **Codex** (`backend: "codex"`), side by side under one queue. See [Codex backend](#codex-backend).
 - **Fan-out in one call** — `tasks: [...]` with shared defaults.
 - **Role presets** — `coder`, `tester`, `reviewer`, `researcher`.
 - **Structured worker reports** — summary, files changed, commands run, tests, open questions, confidence.
@@ -102,6 +103,7 @@ flowchart LR
 | :-- | :-- |
 | Node.js ≥ 20 | No npm packages needed. |
 | [Antigravity CLI](https://antigravity.google) (`agy`) | Logged in; `agy -p "hi"` should work. Found at `~/.local/bin/agy` or on `PATH`, or set `AGY_BIN`. |
+| [Codex CLI](https://github.com/openai/codex) *(optional)* | Only for `backend: "codex"`. Logged in; tested with `codex-cli` 0.169. Found at `~/.local/bin/codex` or on `PATH`, or set `CODEX_BIN`. |
 | git ≥ 2.38 | Only for worktrees and `agy_merge` (`git merge-tree --write-tree`). |
 | Claude Code | Or any MCP client that supports stdio servers. |
 | Orca IDE *(optional)* | Desktop app running; CLI at `/Applications/Orca.app/Contents/Resources/bin/orca` or on `PATH`. |
@@ -190,7 +192,8 @@ Start one worker (`prompt`) or several (`tasks[]`). Top-level fields are default
 | Param | Type | Default | Description |
 | :-- | :-- | :-- | :-- |
 | `prompt` | string | — | Task brief (single worker). |
-| `tasks` | `{prompt, name?, role?}[]` | — | Fan-out. Each item inherits the top-level fields. |
+| `tasks` | `{prompt, name?, role?, backend?}[]` | — | Fan-out. Each item inherits the top-level fields. |
+| `backend` | `agy` \| `codex` | `agy` | Worker CLI. See [Codex backend](#codex-backend). |
 | `name` | string | role or `worker` | Label, used in ids, branch names and commit messages. |
 | `role` | `coder` \| `tester` \| `reviewer` \| `researcher` | — | Preset, see below. |
 | `cwd` | string | server cwd | Absolute working directory. |
@@ -198,17 +201,18 @@ Start one worker (`prompt`) or several (`tasks[]`). Top-level fields are default
 | `base_ref` | string | `HEAD` | Base commit for the worktree. |
 | `verify_cmd` | string | — | Shell command run in the worker dir after each turn. |
 | `max_fix_rounds` | number | 2 | Auto-fix rounds on verify failure. |
-| `model` | string | agy default | e.g. `gemini-3.8-flash-low` (see `agy models`). |
-| `mode` | `accept-edits` \| `auto` \| `plan` | `accept-edits` | agy execution mode. |
-| `effort` | `low`…`max` | agy default | Reasoning effort. |
-| `skip_permissions` | bool | false | `--dangerously-skip-permissions`: allow shell commands. Pair with `sandbox` or a worktree. |
-| `sandbox` | bool | false | `--sandbox` terminal restrictions. |
+| `model` | string | CLI default | e.g. `gemini-3.8-flash-low` (see `agy models`) or a Codex model. |
+| `mode` | `accept-edits` \| `auto` \| `plan` | `accept-edits` | agy execution mode. Codex: `plan` = read-only sandbox. |
+| `effort` | `low`…`max` | CLI default | Reasoning effort. Codex: `max` maps to `xhigh`. |
+| `skip_permissions` | bool | false | agy: `--dangerously-skip-permissions`, allow shell commands. Codex: no sandbox at all only together with an explicit `sandbox: false`. Pair with `sandbox` or a worktree. |
+| `sandbox` | bool | false | agy: `--sandbox` terminal restrictions. Codex: `false` together with `skip_permissions` removes the sandbox. |
+| `network` | bool | false | Codex only: network access inside the workspace-write sandbox (e.g. `npm install`). |
 | `timeout_seconds` | number | 0 (none) | Per-turn limit. |
 | `watch` | bool | false | Open a live log terminal in Orca. |
 | `json_schema` | string | built-in report | Custom result schema (JSON string or file path). |
 
 Advanced (accepted, not advertised in the schema to save tokens): `add_dirs` (string[]), `report` (false disables
-the built-in report schema), `stall_seconds` (default 180), `verify_timeout_seconds` (default 600),
+the built-in report schema), `stall_seconds` (default 180, Codex 300), `verify_timeout_seconds` (default 600),
 `dangerously_skip_permissions` (alias of `skip_permissions`).
 
 **Role presets**
@@ -390,6 +394,7 @@ Set `AGY_ORCA=0` to disable Orca entirely.
 | Variable | Default | Description |
 | :-- | :-- | :-- |
 | `AGY_BIN` | `~/.local/bin/agy`, else `agy` | agy executable. |
+| `CODEX_BIN` | `~/.local/bin/codex`, else `codex` | Codex executable (`backend: "codex"`). |
 | `AGY_LOG_DIR` | `<server>/logs` | Per-worker `*.ndjson`, `*.stderr`, `*.verify.log`. |
 | `AGY_STATE_DIR` | `<server>/state` | `agents.json`. |
 | `AGY_MAX_CONCURRENT` | `4` | Running + verifying workers; the rest are `queued`. |
@@ -407,6 +412,41 @@ Observed with the `agy` CLI as of November 2026 (fixtures in `test/fixtures/`):
 - **`--json-schema`** puts the parsed object in `result.structured_output` and costs the worker one extra short step. Disable with `report: false`.
 - **`--disable-slash-commands` turns `--mode plan` into a no-op** (agy prints a warning). The server passes it only outside plan mode.
 - Stream format: `{"event":"init"}`, `{"event":"step_update","step_update":{step_type, state, tool_name, tool_info, text_delta, usage}}`, `{"event":"result","result":{status, response, structured_output, usage, denied_actions}}`.
+
+## Codex backend
+
+Pass `backend: "codex"` (top level or per task) to run a worker with the OpenAI Codex CLI instead of agy.
+Everything else is shared: queue, verify & auto-fix, worktrees, merge, attention flags, restart recovery.
+
+```jsonc
+// agy_spawn
+{ "backend": "codex", "cwd": "/abs/repo", "use_worktree": true,
+  "prompt": "Fix the failing date parser", "verify_cmd": "npm test -- dates" }
+```
+
+| | agy | Codex |
+| :-- | :-- | :-- |
+| First turn | `agy -p … --output-format stream-json` | `codex exec --json -s <sandbox> -C <cwd> …` |
+| Follow-up / fix | `--conversation <id>` | `codex exec resume <thread_id> …` (sandbox passed as `-c sandbox_mode=…`; `resume` has no `-s`/`-C`) |
+| Report | `--json-schema '<json>'` | `--output-schema <file>` with a **strict** schema (every key required, optional ones nullable) |
+| Shell commands | Denied headless unless `skip_permissions`; a denial aborts the turn | Always allowed **inside the sandbox**; a blocked write does not abort the turn |
+
+**Sandbox policy.** `codex exec` never asks for approval, so the sandbox is the only guard:
+
+| Worker | Codex sandbox | Network |
+| :-- | :-- | :-- |
+| `mode: "plan"` (`reviewer`, `researcher`) | `read-only` | off |
+| default / `coder` | `workspace-write` | `network` |
+| `tester` (`skip_permissions` + `sandbox`) | `workspace-write` | `network` |
+| `skip_permissions` + explicit `sandbox: false` | none (`--dangerously-bypass-approvals-and-sandbox`) | on |
+| `skip_permissions` alone | `workspace-write` | `network` |
+
+Because Codex workers can run commands themselves, prefer letting them run tests, and keep `verify_cmd` as the
+independent check. Codex only reports reasoning once it is complete, so the stall threshold defaults to 300 s.
+Codex workers load the MCP servers and skills from your `~/.codex` config. Workers are told not to commit;
+`agy_merge` commits whatever they leave in the worktree.
+
+Stream format (fixtures: `test/fixtures/codex-*.ndjson`): `{"type":"thread.started","thread_id"}`, `{"type":"item.started|item.completed","item":{type: agent_message|command_execution|file_change|mcp_tool_call|web_search|reasoning,…}}`, `{"type":"turn.completed","usage"}`, `{"type":"turn.failed","error"}`. The report is the JSON text of the last `agent_message`.
 
 ## Token benchmarks
 
@@ -426,11 +466,13 @@ Reproduce with the size assertions in `test-mcp.mjs`.
 npm test
 ```
 
-21 end-to-end tests drive the real server over stdio with mock `agy` and `orca` executables:
+28 end-to-end tests drive the real server over stdio with mock `agy`, `codex` and `orca` executables:
 report parsing, event filtering, role flags, worktree diff with untracked files, merge refusal / conflict
 prediction / squash merge, verify fail→fix→pass, verify exhaustion, verify timeout, denied/loop/stall flags,
 concurrency queue, process-group kill (including grandchildren), interrupt + resume, restart with a live
-worker and with a dead one, Orca calls and Orca failure fallback, and payload size budgets.
+worker and with a dead one, Orca calls and Orca failure fallback, and payload size budgets. Codex: the parser
+against real captures, the sandbox policy table, `exec`/`exec resume` arguments, strict schema, verify→fix, and
+`turn.failed`.
 
 ## Troubleshooting
 
@@ -443,6 +485,8 @@ worker and with a dead one, Orca calls and Orca failure fallback, and payload si
 | `agy_merge`: "possibly sensitive files" | Delete or gitignore the listed files in the worktree, then retry. |
 | `agy_cleanup` refuses to delete the branch | It isn't merged; pass `force: true` if you're sure. |
 | `agy_wait` returns `timed_out` repeatedly | The worker is still working; check `last` in the digest. The cap is 300 s per call. |
+| Codex worker fails installing packages | The workspace sandbox has no network; spawn with `network: true`. |
+| Codex worker `stalled` while thinking | Codex emits reasoning only when done; raise `stall_seconds`. |
 | Tools missing in Claude Code | `/mcp` → reconnect `agy-orchestrator`; check `node --version` ≥ 20. |
 
 Raw logs: `logs/<id>.ndjson` (agy stream + server markers), `logs/<id>.stderr`, `logs/<id>.verify.log`.
@@ -466,7 +510,8 @@ Raw logs: `logs/<id>.ndjson` (agy stream + server markers), `logs/<id>.stderr`, 
 ```
 server.mjs            JSON-RPC 2.0 stdio transport
 lib/engine.mjs        detached processes, log tailing, queue, verify/auto-fix, restore
-lib/events.mjs        stream-json parser (schema: test/fixtures/*.ndjson)
+lib/backends/         per-CLI args, prompt rules and stream parsers: agy.mjs, codex.mjs
+lib/events.mjs        agy stream-json parser + shared milestone helpers (schema: test/fixtures/*.ndjson)
 lib/git.mjs           worktrees, change summary, budgeted diff, safe merge
 lib/orca.mjs          Orca IDE integration (best-effort)
 lib/state.mjs         persistence
@@ -474,8 +519,8 @@ lib/tools.mjs         tool schemas + handlers, role presets
 lib/util.mjs          helpers
 bin/agy-tail.mjs      live log viewer (used by Orca watch terminals)
 skills/agy-monitor/   Claude Code skill: the orchestration playbook
-test-mcp.mjs          end-to-end tests with mock agy/orca
-test/fixtures/        real agy stream-json captures
+test-mcp.mjs          end-to-end tests with mock agy/codex/orca
+test/fixtures/        real agy stream-json and codex exec --json captures
 ```
 
 ## Contributing
