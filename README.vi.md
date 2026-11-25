@@ -149,6 +149,8 @@ Mọi lệnh Orca đều best-effort: lỗi chỉ thành `warnings`, không bao 
 | `CODEX_BIN` | `~/.local/bin/codex` |
 | `AGY_LOG_DIR` | `./logs` |
 | `AGY_STATE_DIR` | `./state` |
+| `AGY_WORKTREE_DIR` | cạnh repo: `<thư mục cha>/<repo>.agy-worktrees/<id>` |
+| `AGY_WORKTREE_LINKS` | `node_modules,.venv` |
 | `AGY_MAX_CONCURRENT` | `4` |
 | `AGY_RETENTION_DAYS` | `7` |
 | `AGY_KILL_ON_EXIT` | không đặt |
@@ -190,7 +192,8 @@ Truyền `backend: "codex"` (ở cấp ngoài hoặc trong từng task) để wo
   - Mới test trên macOS.
 - **Bảo mật:**
   - `verify_cmd` và `skip_permissions` chạy lệnh tùy ý, nên chỉ dùng với repo tin cậy.
-  - `logs/` và `state/` đã được gitignore.
+  - `logs/`, `state/` và `worktrees/` đã được gitignore.
+  - `node_modules`/`.venv` được symlink vào worktree nên dùng chung với repo chính: worker chạy lệnh ngoài sandbox (ví dụ `npm install` với `skip_permissions` của agy) sẽ sửa thật vào đó. Đặt `AGY_WORKTREE_LINKS=` để tắt.
 
 Chi tiết từng tham số, sơ đồ kiến trúc, troubleshooting và cách đóng góp: xem [README.md](README.md).
 

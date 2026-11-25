@@ -197,7 +197,7 @@ Start one worker (`prompt`) or several (`tasks[]`). Top-level fields are default
 | `name` | string | role or `worker` | Label, used in ids, branch names and commit messages. |
 | `role` | `coder` \| `tester` \| `reviewer` \| `researcher` | — | Preset, see below. |
 | `cwd` | string | server cwd | Absolute working directory. |
-| `use_worktree` | bool | false | Create `.agy-worktrees/<id>` on branch `agy/<id>`. Use for parallel edits. |
+| `use_worktree` | bool | false | Create a worktree on branch `agy/<id>` next to the repo (`<parent>/<repo>.agy-worktrees/<id>`), with `node_modules`/`.venv` linked from the main checkout. Use for parallel edits. |
 | `base_ref` | string | `HEAD` | Base commit for the worktree. |
 | `verify_cmd` | string | — | Shell command run in the worker dir after each turn. |
 | `max_fix_rounds` | number | 2 | Auto-fix rounds on verify failure. |
@@ -397,6 +397,8 @@ Set `AGY_ORCA=0` to disable Orca entirely.
 | `CODEX_BIN` | `~/.local/bin/codex`, else `codex` | Codex executable (`backend: "codex"`). |
 | `AGY_LOG_DIR` | `<server>/logs` | Per-worker `*.ndjson`, `*.stderr`, `*.verify.log`. |
 | `AGY_STATE_DIR` | `<server>/state` | `agents.json`. |
+| `AGY_WORKTREE_DIR` | next to the repo | Default `<parent>/<repo>.agy-worktrees/<id>`: outside the repo, so test runners and linters in the main checkout don't pick worktrees up, yet with the same parent dirs, so parent `package.json`/`tsconfig`/`.nvmrc` resolve as in the main checkout. If set: `<dir>/<repo>-<hash>/<id>`; don't point it inside another project. |
+| `AGY_WORKTREE_LINKS` | `node_modules,.venv` | Untracked dependency dirs symlinked from the main checkout into each worktree (repo root and the worker's subdir). Empty = none. |
 | `AGY_MAX_CONCURRENT` | `4` | Running + verifying workers; the rest are `queued`. |
 | `AGY_RETENTION_DAYS` | `7` | Prune finished workers and logs after this. |
 | `AGY_KILL_ON_EXIT` | unset | `1` = kill workers when the server exits. |
@@ -504,6 +506,7 @@ Raw logs: `logs/<id>.ndjson` (agy stream + server markers), `logs/<id>.stderr`, 
 - `verify_cmd` and `skip_permissions` execute arbitrary commands. Only use them in repos you trust, ideally in worktrees and with `sandbox`.
 - Logs may contain code, prompts and command output from your projects. `logs/` and `state/` are gitignored; don't publish them.
 - `agy_merge` refuses common secret files, but that is a safety net, not a guarantee. Review what you merge.
+- Linked dependency dirs (`AGY_WORKTREE_LINKS`) are shared with your main checkout: a worker allowed to run commands outside a sandbox (e.g. `npm install` with agy `skip_permissions`) changes them for real. Codex's workspace sandbox blocks writes through the link, unless the target is writable anyway (e.g. a repo under `/tmp`). Set `AGY_WORKTREE_LINKS=` to disable linking.
 
 ## Project layout
 

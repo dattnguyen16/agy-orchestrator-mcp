@@ -103,8 +103,13 @@ g("init", "-q", "-b", "main");
 g("config", "user.email", "t@example.com");
 g("config", "user.name", "Test");
 fs.writeFileSync(path.join(repo, "shared.txt"), "base\n");
+// Trailing slash on purpose: this pattern does NOT match a symlink named node_modules.
+fs.writeFileSync(path.join(repo, ".gitignore"), "node_modules/\n");
 g("add", ".");
 g("commit", "-qm", "init");
+fs.mkdirSync(path.join(repo, "node_modules", "dep"), { recursive: true });
+fs.writeFileSync(path.join(repo, "node_modules", "dep", "index.js"), "module.exports = 42;\n");
+const WT_DIR = path.join(tmp, "repo.agy-worktrees"); // default: next to the repo
 
 // ---------------------------------------------------------------------------
 // MCP client
@@ -295,9 +300,29 @@ await test("merge refuses secrets inside new dirs and ones the worker committed"
 });
 
 await test("cleanup removes worktree", async () => {
+  const wt = (await c.call("agy_result", { agent_id: wtAgent.id })).cwd;
   const r = await c.call("agy_cleanup", { agent_id: wtAgent.id, delete_branch: true });
   assert.ok(r.actions.includes("worktree removed"));
-  assert.ok(!fs.existsSync(path.join(repo, ".agy-worktrees", wtAgent.id)));
+  assert.ok(!fs.existsSync(wt));
+  assert.ok(fs.existsSync(path.join(repo, "node_modules", "dep", "index.js")), "removing the worktree keeps the linked node_modules");
+});
+
+await test("worktree lives outside the repo, deps linked but never merged", async () => {
+  const a = await spawnOne(c, { prompt: "WRITE_FILE dep.txt x", cwd: repo, use_worktree: true, name: "deps" });
+  await waitDone(c, a.id);
+  const wt = (await c.call("agy_result", { agent_id: a.id })).cwd;
+  assert.ok(fs.realpathSync(wt).startsWith(fs.realpathSync(WT_DIR) + path.sep), wt);
+  assert.ok(!fs.existsSync(path.join(repo, ".agy-worktrees")), "nothing nested in the repo");
+  assert.ok(fs.lstatSync(path.join(wt, "node_modules")).isSymbolicLink());
+  const resolved = execFileSync(process.execPath, ["-e", "console.log(require('dep'))"], { cwd: wt, encoding: "utf8" }).trim();
+  assert.equal(resolved, "42", "Node resolves deps through the link");
+  const res = await c.call("agy_result", { agent_id: a.id });
+  assert.doesNotMatch(res.changes, /node_modules/);
+  const m = await c.call("agy_merge", { agent_id: a.id });
+  assert.equal(m.merged, true, JSON.stringify(m));
+  assert.deepEqual(m.files, ["dep.txt"], "the symlink was not committed");
+  await c.call("agy_cleanup", { agent_id: a.id, delete_branch: true });
+  assert.ok(fs.existsSync(path.join(repo, "node_modules", "dep", "index.js")));
 });
 
 await test("verify fail then auto-fix pass", async () => {
@@ -577,6 +602,19 @@ await test("orca failures are warnings, never errors", async () => {
   assert.equal(d.status, "completed");
   await c2.call("agy_cleanup", { agent_id: a.id, force: true, delete_branch: true });
   await c2.close();
+});
+
+await test("AGY_WORKTREE_DIR override: <dir>/<repo>-<hash>/<id>, empty folder removed on cleanup", async () => {
+  const dir = path.join(tmp, "custom-wt");
+  const c3 = new Client({ AGY_STATE_DIR: path.join(tmp, "state3"), AGY_WORKTREE_DIR: dir, AGY_ORCA: "0" });
+  await c3.rpc("initialize", {});
+  const a = await spawnOne(c3, { prompt: "hi", cwd: repo, use_worktree: true });
+  await waitDone(c3, a.id);
+  const wt = (await c3.call("agy_result", { agent_id: a.id })).cwd;
+  assert.match(path.relative(dir, wt), /^repo-[0-9a-f]{6}\/agy-worker-/);
+  await c3.call("agy_cleanup", { agent_id: a.id, force: true, delete_branch: true });
+  assert.deepEqual(fs.readdirSync(dir), [], "per-repo folder removed once empty");
+  await c3.close();
 });
 
 console.log(`\n${passed} passed${process.exitCode ? ", some FAILED" : ""}`);
