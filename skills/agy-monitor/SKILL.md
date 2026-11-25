@@ -1,9 +1,9 @@
 ---
 name: agy-monitor
-description: Orchestrate and monitor Antigravity (`agy`) sub-agents via the `agy-orchestrator` MCP server. Use when the user asks Claude Code to act as a monitor, tech lead, or orchestrator directing Antigravity sub-agents.
+description: Orchestrate and monitor Antigravity (`agy`) or OpenAI Codex sub-agents via the `agy-orchestrator` MCP server. Use when the user asks Claude Code to act as a monitor, tech lead, or orchestrator directing Antigravity or Codex workers.
 ---
 
-# Antigravity worker playbook (agy-orchestrator v2)
+# Worker playbook (agy-orchestrator v2.1: agy + Codex)
 
 You are the tech lead. Workers do the reading and the editing; you spend tokens on planning and decisions, not on reading their output.
 
@@ -19,14 +19,16 @@ You are the tech lead. Workers do the reading and the editing; you spend tokens 
   - `tester` runs commands, sandboxed.
   - `reviewer` and `researcher` are read-only.
 - **Always pass `verify_cmd`** when there is a test, lint or build command (e.g. `npm test -- path`, `pytest tests/x`, `tsc --noEmit`). The server runs it after each turn and sends failures back to the worker for up to `max_fix_rounds` (default 2) before it ever wakes you.
-- Headless agy denies shell commands. Prefer `verify_cmd` over `skip_permissions`. If a worker really must run commands, pair `skip_permissions` with `sandbox` or a worktree.
+- `backend`: `agy` (default) or `codex`. Use `codex` when the user asks for Codex workers, or when a worker must run commands itself (tests, builds) without disabling its sandbox. Backends can be mixed per task.
+- agy: headless agy denies shell commands. Prefer `verify_cmd` over `skip_permissions`. If a worker really must run commands, pair `skip_permissions` with `sandbox` or a worktree.
+- codex: workers run commands inside a sandbox: `plan`/reviewer = read-only, everything else = write inside the workspace, no network. Don't pass `skip_permissions` (without `sandbox` it removes the sandbox entirely). Pass `network: true` only when the worker must install packages.
 - `watch: true` when the user wants to watch a worker live in Orca.
 
 ## 3. Wait, don't poll
 - Call `agy_wait` (default 120s, no ids means all active workers). It returns early on completion **or attention**:
   - `stalled`: no output for a while;
   - `looping`: same tool call repeated;
-  - `denied`: a shell command was refused;
+  - `denied`: a shell command was refused (agy only);
   - `needs_attention`: verify still failing after the fix rounds.
 - Each finished worker's `report`, `changes` and `verify` arrive **once**, inside the wait result. Don't call `agy_result` for them again.
 - Timed out with nothing new? Wait again. Never loop on `timeout_seconds: 0`.

@@ -13,6 +13,8 @@
   - tách các việc song song ra git worktree riêng;
   - merge an toàn.
 
+Worker có thể là `agy` (mặc định) hoặc **OpenAI Codex** (`backend: "codex"`), chạy song song trong cùng một hàng đợi. Xem [Codex backend](#codex-backend).
+
 Có thể tích hợp với **Orca IDE** (Stably AI) để xem worker chạy trực tiếp và review diff.
 
 ## Vì sao cần
@@ -32,6 +34,7 @@ Có thể tích hợp với **Orca IDE** (Stably AI) để xem worker chạy tr�
 
 - Node.js ≥ 20, không cần `npm install`.
 - `agy` CLI đã đăng nhập (`~/.local/bin/agy`, nằm trong `PATH`, hoặc đặt `AGY_BIN`).
+- Codex CLI *(chỉ cần khi dùng `backend: "codex"`)* đã đăng nhập, đã test với `codex-cli` 0.169 (`~/.local/bin/codex`, `PATH`, hoặc `CODEX_BIN`).
 - git ≥ 2.38 (cho worktree và `agy_merge`).
 - Claude Code, hoặc MCP client bất kỳ hỗ trợ stdio.
 - Orca IDE *(không bắt buộc)*.
@@ -72,7 +75,7 @@ agy_cleanup { "agent_id": "agy-parser-fix-…", "delete_branch": true }
 
 | Tool | Chức năng |
 | :-- | :-- |
-| `agy_spawn` | Chạy 1 worker (`prompt`) hoặc nhiều worker (`tasks[]`); field ở cấp ngoài là mặc định chung. Tham số: `role`, `use_worktree`, `base_ref`, `verify_cmd`, `max_fix_rounds`, `model`, `mode`, `effort`, `skip_permissions`, `sandbox`, `timeout_seconds`, `watch`, `json_schema`. |
+| `agy_spawn` | Chạy 1 worker (`prompt`) hoặc nhiều worker (`tasks[]`); field ở cấp ngoài là mặc định chung. Tham số: `backend` (`agy`/`codex`), `network` (chỉ Codex), `role`, `use_worktree`, `base_ref`, `verify_cmd`, `max_fix_rounds`, `model`, `mode`, `effort`, `skip_permissions`, `sandbox`, `timeout_seconds`, `watch`, `json_schema`. |
 | `agy_wait` | Chờ worker xong **hoặc cần chú ý**. Report, `changes`, `verify` chỉ gửi một lần. `timeout_seconds` 0–300, mặc định 120; giá trị 0 là snapshot. |
 | `agy_result` | `view`: `report` (mặc định), `full`, `diff` (gồm cả file mới), `events`. `orca_open` mở diff trong Orca. |
 | `agy_instruct` | Gửi chỉ đạo tiếp trong cùng conversation. `interrupt:true` dừng turn đang chạy. |
@@ -110,7 +113,7 @@ agy_cleanup { "agent_id": "agy-parser-fix-…", "delete_branch": true }
 
 | Cờ | Khi nào |
 | :-- | :-- |
-| `stalled` | Không có event mới sau 180 giây. |
+| `stalled` | Không có event mới sau 180 giây (Codex: 300 giây). |
 | `looping` | Cùng tool, cùng tham số, lặp ≥5 lần liên tiếp. |
 | `denied` | agy tự từ chối lệnh shell ở chế độ headless. Chỉ gắn khi không có `verify_cmd`. |
 
@@ -143,6 +146,7 @@ Mọi lệnh Orca đều best-effort: lỗi chỉ thành `warnings`, không bao 
 | Biến | Mặc định |
 | :-- | :-- |
 | `AGY_BIN` | `~/.local/bin/agy` |
+| `CODEX_BIN` | `~/.local/bin/codex` |
 | `AGY_LOG_DIR` | `./logs` |
 | `AGY_STATE_DIR` | `./state` |
 | `AGY_MAX_CONCURRENT` | `4` |
@@ -158,9 +162,28 @@ Mọi lệnh Orca đều best-effort: lỗi chỉ thành `warnings`, không bao 
 - `--json-schema` cho kết quả ở `result.structured_output`, và worker tốn thêm một bước ngắn. Tắt bằng `report:false`.
 - `--disable-slash-commands` làm `--mode plan` mất tác dụng, nên server chỉ bật cờ này ngoài plan mode.
 
+## Codex backend
+
+Truyền `backend: "codex"` (ở cấp ngoài hoặc trong từng task) để worker chạy bằng Codex CLI. Hàng đợi, verify và tự sửa, worktree, merge, các cờ cần chú ý và khôi phục sau restart đều dùng chung với agy.
+
+- Turn đầu chạy `codex exec --json -s <sandbox> -C <cwd>`. Turn tiếp theo và các vòng sửa chạy `codex exec resume <thread_id>`. Vì `resume` không nhận `-s`, server truyền sandbox bằng `-c sandbox_mode=…`.
+- Report dùng `--output-schema <file>` với schema **strict**: mọi key đều bắt buộc, key tuỳ chọn được phép `null`.
+- Worker Codex **tự chạy lệnh được, nhưng chỉ trong sandbox**. Một lệnh ghi bị chặn không làm hỏng turn như ở agy.
+- `codex exec` không bao giờ hỏi xin phép, nên sandbox là lớp bảo vệ duy nhất:
+
+| Worker | Sandbox Codex | Mạng |
+| :-- | :-- | :-- |
+| `mode: "plan"` (`reviewer`, `researcher`) | `read-only` | tắt |
+| mặc định / `coder` | `workspace-write` | theo `network` |
+| `tester` (`skip_permissions` + `sandbox`) | `workspace-write` | theo `network` |
+| `skip_permissions` không có `sandbox` | không sandbox | bật |
+
+- Worker cần `npm install` hoặc `pip install` thì truyền `network: true`.
+- Worker Codex nạp cả MCP server lẫn skill trong config `~/.codex` của bạn.
+
 ## Kiểm thử, giới hạn, bảo mật
 
-- `npm test` chạy 21 test end-to-end với mock `agy` và mock `orca`.
+- `npm test` chạy 28 test end-to-end với mock `agy`, mock `codex` và mock `orca`.
 - **Giới hạn:**
   - Schema stream-json của agy chưa có tài liệu chính thức; parser dựa trên output quan sát được (tháng 11/2026).
   - Mới test trên macOS.

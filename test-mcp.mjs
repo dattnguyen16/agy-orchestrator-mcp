@@ -50,6 +50,38 @@ else {
 `);
 fs.chmodSync(mockAgy, 0o755);
 
+// Mock `codex exec --json`, shaped after test/fixtures/codex-*.ndjson (codex-cli 0.169).
+const mockCodex = path.join(tmp, "mock-codex");
+fs.writeFileSync(mockCodex, `#!/usr/bin/env node
+const fs = require("fs"), path = require("path");
+const args = process.argv.slice(2);
+fs.appendFileSync(${JSON.stringify(ARGV_LOG)}, JSON.stringify({ bin: "codex", cwd: process.cwd(), args }) + "\\n");
+const resumed = args[1] === "resume";
+const prompt = args.at(-1);
+const tid = resumed ? args.at(-2) : "01a2108a-0000-7000-8000-" + String(process.pid).padStart(12, "0");
+const out = (o) => fs.writeSync(1, JSON.stringify(o) + "\\n");
+const item = (phase, it) => out({ type: phase, item: it });
+out({ type: "thread.started", thread_id: tid });
+out({ type: "turn.started" });
+item("item.completed", { id: "item_0", type: "agent_message", text: "I'll do it." });
+for (const m of prompt.matchAll(/WRITE_FILE (\\S+) (.+)/g)) {
+  const cmd = "/bin/zsh -lc 'printf x > " + m[1] + "'";
+  item("item.started", { id: "w", type: "command_execution", command: cmd, aggregated_output: "", exit_code: null, status: "in_progress" });
+  fs.writeFileSync(path.join(process.cwd(), m[1]), m[2] + "\\n");
+  item("item.completed", { id: "w", type: "command_execution", command: cmd, aggregated_output: "", exit_code: 0, status: "completed" });
+}
+if (prompt.includes("verification command") && prompt.includes("ok.txt")) fs.writeFileSync("ok.txt", "ok\\n");
+const bad = "/bin/zsh -lc 'cat nope.txt'";
+item("item.started", { id: "c", type: "command_execution", command: bad, aggregated_output: "", exit_code: null, status: "in_progress" });
+item("item.completed", { id: "c", type: "command_execution", command: bad, aggregated_output: "cat: nope.txt: No such file", exit_code: 1, status: "failed" });
+if (prompt.includes("CXFAIL")) { out({ type: "error", message: "Reconnecting... 1/5" }); out({ type: "turn.failed", error: { message: "stream disconnected" } }); process.exit(1); }
+const schemaAt = args.indexOf("--output-schema");
+const report = { summary: "codex did it", files_changed: [path.join(process.cwd(), "a.txt")], commands_run: null, tests: "not run", open_questions: null, confidence: "high" };
+item("item.completed", { id: "item_9", type: "agent_message", text: schemaAt >= 0 ? JSON.stringify(report) : "plain answer" });
+out({ type: "turn.completed", usage: { input_tokens: 1000, cached_input_tokens: 500, output_tokens: 234, reasoning_output_tokens: 0 } });
+`);
+fs.chmodSync(mockCodex, 0o755);
+
 const mockOrca = path.join(tmp, "mock-orca");
 fs.writeFileSync(mockOrca, `#!/usr/bin/env node
 const fs = require("fs");
@@ -81,7 +113,7 @@ class Client {
   constructor(env = {}) {
     this.stateDir = env.AGY_STATE_DIR;
     this.proc = spawn(process.execPath, [SERVER], {
-      env: { ...process.env, AGY_BIN: mockAgy, ORCA_BIN: mockOrca, AGY_LOG_DIR: path.join(tmp, "logs"), ...env },
+      env: { ...process.env, AGY_BIN: mockAgy, CODEX_BIN: mockCodex, ORCA_BIN: mockOrca, AGY_LOG_DIR: path.join(tmp, "logs"), ...env },
       stdio: ["pipe", "pipe", "inherit"],
     });
     this.nextId = 1;
@@ -159,7 +191,7 @@ let c = new Client({ AGY_STATE_DIR: stateDir, AGY_MAX_CONCURRENT: "2" });
 
 await test("initialize + compact tools/list", async () => {
   const init = await c.rpc("initialize", {});
-  assert.equal(init.result.serverInfo.version, "2.0.0");
+  assert.equal(init.result.serverInfo.version, "2.1.0");
   const list = await c.rpc("tools/list");
   const bytes = JSON.stringify(list.result.tools).length;
   assert.equal(list.result.tools.length, 8);
@@ -397,6 +429,103 @@ await test("restart: live worker survives and is re-attached; dead one is interr
   const lst = await c.call("agy_list", {});
   assert.match(lst, new RegExp(slow.id));
   for (const id of [slow.id, doomed.id, first.id]) await c.call("agy_cleanup", { agent_id: id });
+});
+
+// ---------------------------------------------------------------------------
+// Codex backend
+// ---------------------------------------------------------------------------
+const codexArgv = () => argvLines().filter((l) => l.bin === "codex");
+const flagVal = (argv, f) => argv[argv.indexOf(f) + 1];
+
+await test("codex parser: real fixtures -> report, commands, failures, usage", async () => {
+  const codex = await import("./lib/backends/codex.mjs");
+  const agent = { cwd: __dirname, config: { report: true }, turns: [{}], events: [], flags: {}, loop: { sig: null, count: 0 } };
+  const feed = (f) => fs.readFileSync(path.join(__dirname, "test/fixtures", f), "utf8").trim().split("\n").forEach((l) => codex.applyEvent(agent, JSON.parse(l)));
+  feed("codex-commands.ndjson");
+  const t = agent.turns[0];
+  assert.equal(agent.conversationId, "01a2108a-5358-7240-941c-9f41e5da8d76");
+  assert.equal(t.sawResult, true);
+  assert.equal(t.resultStatus, "DONE");
+  assert.match(t.structured.summary, /7 files/);
+  assert.equal(t.usage.total_tokens, 42302 + 180);
+  const text = agent.events.map((e) => e.text).join("\n");
+  assert.match(text, /shell ×3 \(last: cat lib\/doesnotexist\.mjs\)/, "coalesced, zsh -lc wrapper stripped");
+  assert.match(text, /✗ shell exit 1: cat lib\/doesnotexist\.mjs/);
+  agent.turns.push({});
+  feed("codex-resume-blocked-write.ndjson");
+  assert.match(agent.turns[1].structured.summary, /blocked/, "a sandbox-blocked write does not abort the turn");
+});
+
+await test("codex sandbox policy table", async () => {
+  const { sandboxPolicy } = await import("./lib/backends/codex.mjs");
+  assert.deepEqual(sandboxPolicy({ mode: "plan", skipPermissions: true, sandbox: false }), { mode: "read-only", network: false });
+  assert.deepEqual(sandboxPolicy({ mode: "accept-edits", skipPermissions: false, sandbox: false }), { mode: "workspace-write", network: false });
+  assert.deepEqual(sandboxPolicy({ mode: "accept-edits", skipPermissions: true, sandbox: true, network: true }), { mode: "workspace-write", network: true });
+  assert.equal(sandboxPolicy({ mode: "auto", skipPermissions: true, sandbox: false }).mode, "danger-full-access");
+});
+
+let cx;
+await test("codex worker: exec args, strict schema file, report, failed command shown", async () => {
+  cx = await spawnOne(c, { prompt: "WRITE_FILE a.txt hi", cwd: repo, backend: "codex", use_worktree: true, name: "cx" });
+  const d = await waitDone(c, cx.id);
+  assert.equal(d.status, "completed", JSON.stringify(d));
+  assert.equal(d.report.summary, "codex did it");
+  assert.deepEqual(d.report.files_changed, ["a.txt"]);
+  assert.match(d.changes, /a\.txt\(new\)/);
+  const argv = codexArgv().at(-1).args;
+  assert.deepEqual(argv.slice(0, 3), ["exec", "--json", "--skip-git-repo-check"]);
+  assert.equal(flagVal(argv, "-s"), "workspace-write", "coder writes inside the workspace sandbox");
+  assert.ok(flagVal(argv, "-C").includes(cx.id));
+  const schema = JSON.parse(fs.readFileSync(flagVal(argv, "--output-schema"), "utf8"));
+  assert.equal(schema.additionalProperties, false);
+  assert.deepEqual([...schema.required].sort(), Object.keys(schema.properties).sort(), "strict: all properties required");
+  assert.doesNotMatch(argv.at(-1), /Shell commands are disabled/);
+  assert.match(argv.at(-1), /sandbox/);
+  const ev = await c.call("agy_result", { agent_id: cx.id, view: "events" });
+  assert.match(ev, /✗ shell exit 1: cat nope\.txt/);
+  assert.match(await c.call("agy_list", {}), new RegExp(`${cx.id} completed codex`));
+});
+
+await test("codex instruct resumes the thread; sandbox passed as config", async () => {
+  const r = await c.call("agy_instruct", { agent_id: cx.id, prompt: "and more", effort: "max" });
+  assert.equal(r.resumed, true);
+  const d = await waitDone(c, cx.id);
+  assert.equal(d.status, "completed");
+  const argv = codexArgv().at(-1).args;
+  assert.deepEqual(argv.slice(0, 2), ["exec", "resume"]);
+  assert.ok(!argv.includes("-s") && !argv.includes("-C"), "exec resume has no -s/-C");
+  assert.ok(argv.includes('sandbox_mode="workspace-write"'));
+  assert.ok(argv.includes('model_reasoning_effort="xhigh"'), "max maps to xhigh");
+  assert.match(argv.at(-2), /^01a2108a-/);
+  await c.call("agy_cleanup", { agent_id: cx.id, force: true, delete_branch: true });
+});
+
+await test("codex reviewer is read-only; verify + auto-fix works on codex", async () => {
+  const rv = await spawnOne(c, { prompt: "review", cwd: repo, backend: "codex", role: "reviewer" });
+  await waitDone(c, rv.id);
+  assert.equal(flagVal(codexArgv().at(-1).args, "-s"), "read-only");
+  const fx = await spawnOne(c, { prompt: "FIXME", cwd: repo, backend: "codex", use_worktree: true, verify_cmd: "test -f ok.txt" });
+  const d = await waitDone(c, fx.id);
+  assert.equal(d.status, "completed", JSON.stringify(d));
+  assert.equal(d.verify, "pass");
+  assert.equal(d.fix, "1/2");
+  const fixPrompt = codexArgv().at(-1).args.at(-1);
+  assert.match(fixPrompt, /verification command/);
+  assert.doesNotMatch(fixPrompt, /Do not run shell commands/, "codex may run commands in its sandbox");
+  for (const a of [rv, fx]) await c.call("agy_cleanup", { agent_id: a.id, force: true, delete_branch: true });
+});
+
+await test("codex turn.failed -> failed with the error message", async () => {
+  const a = await spawnOne(c, { prompt: "CXFAIL", cwd: repo, backend: "codex" });
+  const d = await waitDone(c, a.id);
+  assert.equal(d.status, "failed");
+  assert.match(d.error, /stream disconnected/);
+  await c.call("agy_cleanup", { agent_id: a.id });
+});
+
+await test("unknown backend is rejected per task", async () => {
+  const r = await c.call("agy_spawn", { prompt: "x", cwd: repo, backend: "gpt" });
+  assert.match(r.spawned[0].error, /Unknown backend 'gpt'/);
 });
 
 await c.close();
