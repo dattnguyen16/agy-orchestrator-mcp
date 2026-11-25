@@ -176,7 +176,8 @@ Truyền `backend: "codex"` (ở cấp ngoài hoặc trong từng task) để wo
 | `mode: "plan"` (`reviewer`, `researcher`) | `read-only` | tắt |
 | mặc định / `coder` | `workspace-write` | theo `network` |
 | `tester` (`skip_permissions` + `sandbox`) | `workspace-write` | theo `network` |
-| `skip_permissions` không có `sandbox` | không sandbox | bật |
+| `skip_permissions` + `sandbox: false` tường minh | không sandbox | bật |
+| chỉ `skip_permissions` | `workspace-write` | theo `network` |
 
 - Worker cần `npm install` hoặc `pip install` thì truyền `network: true`.
 - Worker Codex nạp cả MCP server lẫn skill trong config `~/.codex` của bạn.

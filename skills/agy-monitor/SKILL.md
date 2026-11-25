@@ -21,7 +21,7 @@ You are the tech lead. Workers do the reading and the editing; you spend tokens 
 - **Always pass `verify_cmd`** when there is a test, lint or build command (e.g. `npm test -- path`, `pytest tests/x`, `tsc --noEmit`). The server runs it after each turn and sends failures back to the worker for up to `max_fix_rounds` (default 2) before it ever wakes you.
 - `backend`: `agy` (default) or `codex`. Use `codex` when the user asks for Codex workers, or when a worker must run commands itself (tests, builds) without disabling its sandbox. Backends can be mixed per task.
 - agy: headless agy denies shell commands. Prefer `verify_cmd` over `skip_permissions`. If a worker really must run commands, pair `skip_permissions` with `sandbox` or a worktree.
-- codex: workers run commands inside a sandbox: `plan`/reviewer = read-only, everything else = write inside the workspace, no network. Don't pass `skip_permissions` (without `sandbox` it removes the sandbox entirely). Pass `network: true` only when the worker must install packages.
+- codex: workers run commands inside a sandbox: `plan`/reviewer = read-only, everything else = write inside the workspace, no network. Don't pass `skip_permissions`; only `skip_permissions` + an explicit `sandbox: false` removes the sandbox, and only the user can ask for that. Pass `network: true` only when the worker must install packages.
 - `watch: true` when the user wants to watch a worker live in Orca.
 
 ## 3. Wait, don't poll

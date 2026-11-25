@@ -204,8 +204,8 @@ Start one worker (`prompt`) or several (`tasks[]`). Top-level fields are default
 | `model` | string | CLI default | e.g. `gemini-3.8-flash-low` (see `agy models`) or a Codex model. |
 | `mode` | `accept-edits` \| `auto` \| `plan` | `accept-edits` | agy execution mode. Codex: `plan` = read-only sandbox. |
 | `effort` | `low`…`max` | CLI default | Reasoning effort. Codex: `max` maps to `xhigh`. |
-| `skip_permissions` | bool | false | agy: `--dangerously-skip-permissions`, allow shell commands. Codex: without `sandbox`, no sandbox at all. Pair with `sandbox` or a worktree. |
-| `sandbox` | bool | false | agy: `--sandbox` terminal restrictions. Codex: keeps `skip_permissions` inside the workspace sandbox. |
+| `skip_permissions` | bool | false | agy: `--dangerously-skip-permissions`, allow shell commands. Codex: no sandbox at all only together with an explicit `sandbox: false`. Pair with `sandbox` or a worktree. |
+| `sandbox` | bool | false | agy: `--sandbox` terminal restrictions. Codex: `false` together with `skip_permissions` removes the sandbox. |
 | `network` | bool | false | Codex only: network access inside the workspace-write sandbox (e.g. `npm install`). |
 | `timeout_seconds` | number | 0 (none) | Per-turn limit. |
 | `watch` | bool | false | Open a live log terminal in Orca. |
@@ -438,7 +438,8 @@ Everything else is shared: queue, verify & auto-fix, worktrees, merge, attention
 | `mode: "plan"` (`reviewer`, `researcher`) | `read-only` | off |
 | default / `coder` | `workspace-write` | `network` |
 | `tester` (`skip_permissions` + `sandbox`) | `workspace-write` | `network` |
-| `skip_permissions` without `sandbox` | none (`--dangerously-bypass-approvals-and-sandbox`) | on |
+| `skip_permissions` + explicit `sandbox: false` | none (`--dangerously-bypass-approvals-and-sandbox`) | on |
+| `skip_permissions` alone | `workspace-write` | `network` |
 
 Because Codex workers can run commands themselves, prefer letting them run tests, and keep `verify_cmd` as the
 independent check. Codex only reports reasoning once it is complete, so the stall threshold defaults to 300 s.

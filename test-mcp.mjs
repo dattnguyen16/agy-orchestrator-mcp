@@ -462,6 +462,16 @@ await test("codex sandbox policy table", async () => {
   assert.deepEqual(sandboxPolicy({ mode: "accept-edits", skipPermissions: false, sandbox: false }), { mode: "workspace-write", network: false });
   assert.deepEqual(sandboxPolicy({ mode: "accept-edits", skipPermissions: true, sandbox: true, network: true }), { mode: "workspace-write", network: true });
   assert.equal(sandboxPolicy({ mode: "auto", skipPermissions: true, sandbox: false }).mode, "danger-full-access");
+  assert.equal(sandboxPolicy({ mode: "auto", skipPermissions: true, sandbox: null }).mode, "workspace-write", "skip alone stays sandboxed");
+});
+
+await test("codex: skip_permissions without an explicit sandbox:false keeps the sandbox", async () => {
+  const a = await spawnOne(c, { prompt: "hi", cwd: repo, backend: "codex", skip_permissions: true });
+  await waitDone(c, a.id);
+  const argv = codexArgv().at(-1).args;
+  assert.equal(flagVal(argv, "-s"), "workspace-write");
+  assert.ok(!argv.includes("--dangerously-bypass-approvals-and-sandbox"));
+  await c.call("agy_cleanup", { agent_id: a.id });
 });
 
 let cx;
